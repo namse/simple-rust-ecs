@@ -1,17 +1,16 @@
 use once_cell::sync::OnceCell;
-use sparseset::SparseSet;
-use std::sync::atomic::AtomicUsize;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 struct Entity {
-    id: usize,
+    id: Uuid,
     drop_functions: Vec<Box<dyn FnOnce()>>,
 }
 
-static mut ID: AtomicUsize = AtomicUsize::new(0);
 impl Entity {
     fn new() -> Self {
         Self {
-            id: unsafe { ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) },
+            id: Uuid::new_v4(),
             drop_functions: Vec::new(),
         }
     }
@@ -32,8 +31,8 @@ impl Drop for Entity {
 }
 
 trait Component {
-    fn insert(self, id: usize);
-    fn drop(id: usize);
+    fn insert(self, id: Uuid);
+    fn drop(id: Uuid);
 }
 
 fn new_player() -> Entity {
@@ -58,36 +57,32 @@ impl Collide {
         println!("collide");
     }
 }
-static mut COLLIDES: OnceCell<SparseSet<Collide>> = OnceCell::new();
+static mut COLLIDES: OnceCell<HashMap<Uuid, Collide>> = OnceCell::new();
 impl Component for Collide {
-    fn insert(self, id: usize) {
+    fn insert(self, id: Uuid) {
         unsafe {
-            COLLIDES.get_or_init(|| SparseSet::with_capacity(2048));
+            COLLIDES.get_or_init(|| HashMap::default());
             COLLIDES.get_mut().unwrap().insert(id, self);
         }
     }
 
-    fn drop(id: usize) {
+    fn drop(id: Uuid) {
         unsafe {
-            COLLIDES.get_mut().unwrap().remove(id);
+            COLLIDES.get_mut().unwrap().remove(&id);
         }
     }
 }
 
 impl ComponentCombination for &Collide {
     fn filter(entity: &Entity) -> Option<Self> {
-        unsafe {
-            COLLIDES
-                .get_or_init(|| SparseSet::with_capacity(2048))
-                .get(entity.id)
-        }
+        unsafe { COLLIDES.get_or_init(|| HashMap::default()).get(&entity.id) }
     }
 }
 impl ComponentCombination for &mut Collide {
     fn filter(entity: &Entity) -> Option<Self> {
         unsafe {
-            COLLIDES.get_or_init(|| SparseSet::with_capacity(2048));
-            COLLIDES.get_mut().unwrap().get_mut(entity.id)
+            COLLIDES.get_or_init(|| HashMap::default());
+            COLLIDES.get_mut().unwrap().get_mut(&entity.id)
         }
     }
 }
@@ -98,76 +93,83 @@ impl MoveTo {
         println!("move_to");
     }
 }
-static mut MOVE_TOS: OnceCell<SparseSet<MoveTo>> = OnceCell::new();
+static mut MOVE_TOS: OnceCell<HashMap<Uuid, MoveTo>> = OnceCell::new();
 impl Component for MoveTo {
-    fn insert(self, id: usize) {
+    fn insert(self, id: Uuid) {
         unsafe {
-            MOVE_TOS.get_or_init(|| SparseSet::with_capacity(2048));
+            MOVE_TOS.get_or_init(|| HashMap::default());
             MOVE_TOS.get_mut().unwrap().insert(id, self);
         }
     }
 
-    fn drop(id: usize) {
+    fn drop(id: Uuid) {
         unsafe {
-            MOVE_TOS.get_mut().unwrap().remove(id);
+            MOVE_TOS.get_mut().unwrap().remove(&id);
         }
     }
 }
 impl ComponentCombination for &MoveTo {
     fn filter(entity: &Entity) -> Option<Self> {
-        unsafe {
-            MOVE_TOS
-                .get_or_init(|| SparseSet::with_capacity(2048))
-                .get(entity.id)
-        }
+        unsafe { MOVE_TOS.get_or_init(|| HashMap::default()).get(&entity.id) }
     }
 }
 impl ComponentCombination for &mut MoveTo {
     fn filter(entity: &Entity) -> Option<Self> {
         unsafe {
-            MOVE_TOS.get_or_init(|| SparseSet::with_capacity(2048));
-            MOVE_TOS.get_mut().unwrap().get_mut(entity.id)
+            MOVE_TOS.get_or_init(|| HashMap::default());
+            MOVE_TOS.get_mut().unwrap().get_mut(&entity.id)
         }
     }
 }
 fn main() {
-    let entities = vec![new_player(), new_wall()];
+    // let entities = vec![new_player(), new_wall()];
 
-    let collides = get_components::<&Collide>(&entities);
-    println!("-Collide- {}", collides.len());
-    for collide in collides {
-        collide.collide();
+    // let collides = get_components::<&Collide>(&entities);
+    // println!("-Collide- {}", collides.len());
+    // for collide in collides {
+    //     collide.collide();
+    // }
+
+    // let move_tos = get_components::<&MoveTo>(&entities);
+    // println!("-MoveTo- {}", move_tos.len());
+    // for move_to in move_tos {
+    //     move_to.move_to();
+    // }
+
+    // let collide_with_move_to = get_components::<(&Collide, &MoveTo)>(&entities);
+    // println!("-Collide with MoveTo- {}", collide_with_move_to.len());
+    // for (collide, move_to) in collide_with_move_to {
+    //     collide.collide();
+    //     move_to.move_to();
+    // }
+
+    // let collide_mut_with_move_to = get_components::<(&mut Collide, &MoveTo)>(&entities);
+    // println!(
+    //     "-Collide mut with MoveTo- {}",
+    //     collide_mut_with_move_to.len()
+    // );
+    // for (collide, move_to) in collide_mut_with_move_to {
+    //     collide.collide();
+    //     move_to.move_to();
+    // }
+
+    // let mut app = App::new();
+    // app.add_system(simple_system);
+    // app.add_system(simple_system2);
+    // app.add_system(simple_system3);
+
+    // app.run(&entities);
+    for trial in 0..10 {
+        let mut entities = vec![];
+        for _ in 0..100_000 {
+            entities.push(new_player());
+        }
+
+        let now = std::time::Instant::now();
+        let collides = get_components::<&Collide>(&entities);
+        println!("-Collide- {}", collides.len());
+        println!("trial {trial} time: {:?}", now.elapsed());
     }
-
-    let move_tos = get_components::<&MoveTo>(&entities);
-    println!("-MoveTo- {}", move_tos.len());
-    for move_to in move_tos {
-        move_to.move_to();
-    }
-
-    let collide_with_move_to = get_components::<(&Collide, &MoveTo)>(&entities);
-    println!("-Collide with MoveTo- {}", collide_with_move_to.len());
-    for (collide, move_to) in collide_with_move_to {
-        collide.collide();
-        move_to.move_to();
-    }
-
-    let collide_mut_with_move_to = get_components::<(&mut Collide, &MoveTo)>(&entities);
-    println!(
-        "-Collide mut with MoveTo- {}",
-        collide_mut_with_move_to.len()
-    );
-    for (collide, move_to) in collide_mut_with_move_to {
-        collide.collide();
-        move_to.move_to();
-    }
-
-    let mut app = App::new();
-    app.add_system(simple_system);
-    app.add_system(simple_system2);
-    app.add_system(simple_system3);
-
-    app.run(&entities);
 }
 
 struct App {
@@ -230,11 +232,11 @@ fn get_components<'entity, T: ComponentCombination>(entities: &Vec<Entity>) -> V
     components
 }
 
-impl<'entity, TA: ComponentCombination, TB: ComponentCombination> ComponentCombination
-    for (TA, TB)
+impl<'entity, T0: ComponentCombination, TB: ComponentCombination> ComponentCombination
+    for (T0, TB)
 {
     fn filter(entity: &Entity) -> Option<Self> {
-        let a = TA::filter(entity)?;
+        let a = T0::filter(entity)?;
         let b = TB::filter(entity)?;
         Some((a, b))
     }
