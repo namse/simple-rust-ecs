@@ -1,38 +1,24 @@
-use once_cell::sync::OnceCell;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
+use std::any::{Any, TypeId};
 use uuid::Uuid;
 
 struct Entity {
     id: Uuid,
-    drop_functions: Vec<Box<dyn FnOnce()>>,
+    components: FxHashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Entity {
     fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
-            drop_functions: Vec::new(),
+            components: FxHashMap::default(),
         }
     }
-    fn add_component<T: Component>(mut self, component: T) -> Self {
-        let id = self.id;
-        component.insert(id);
-        self.drop_functions.push(Box::new(move || T::drop(id)));
+    fn add_component<T: 'static>(mut self, component: T) -> Self {
+        self.components
+            .insert(TypeId::of::<T>(), Box::new(component));
         self
     }
-}
-
-impl Drop for Entity {
-    fn drop(&mut self) {
-        for drop_function in self.drop_functions.drain(..) {
-            drop_function();
-        }
-    }
-}
-
-trait Component {
-    fn insert(self, id: Uuid);
-    fn drop(id: Uuid);
 }
 
 fn new_player() -> Entity {
@@ -45,8 +31,14 @@ fn new_wall() -> Entity {
     Entity::new().add_component(Collide {})
 }
 
-trait ComponentCombination {
-    fn filter(entity: &Entity) -> Option<Self>
+trait ComponentCombination<'a> {
+    fn filter(entity: &'a Entity) -> Option<Self>
+    where
+        Self: Sized;
+}
+
+trait ComponentCombinationMut<'a> {
+    fn filter(entity: &'a mut Entity) -> Option<Self>
     where
         Self: Sized;
 }
@@ -57,33 +49,20 @@ impl Collide {
         println!("collide");
     }
 }
-static mut COLLIDES: OnceCell<HashMap<Uuid, Collide>> = OnceCell::new();
-impl Component for Collide {
-    fn insert(self, id: Uuid) {
-        unsafe {
-            COLLIDES.get_or_init(|| HashMap::default());
-            COLLIDES.get_mut().unwrap().insert(id, self);
-        }
-    }
-
-    fn drop(id: Uuid) {
-        unsafe {
-            COLLIDES.get_mut().unwrap().remove(&id);
-        }
+impl<'a> ComponentCombination<'a> for &'a Collide {
+    fn filter(entity: &'a Entity) -> Option<Self> {
+        entity
+            .components
+            .get(&TypeId::of::<Collide>())
+            .map(|c| c.downcast_ref::<Collide>().unwrap())
     }
 }
-
-impl ComponentCombination for &Collide {
-    fn filter(entity: &Entity) -> Option<Self> {
-        unsafe { COLLIDES.get_or_init(|| HashMap::default()).get(&entity.id) }
-    }
-}
-impl ComponentCombination for &mut Collide {
-    fn filter(entity: &Entity) -> Option<Self> {
-        unsafe {
-            COLLIDES.get_or_init(|| HashMap::default());
-            COLLIDES.get_mut().unwrap().get_mut(&entity.id)
-        }
+impl<'a> ComponentCombinationMut<'a> for &'a mut Collide {
+    fn filter(entity: &'a mut Entity) -> Option<Self> {
+        entity
+            .components
+            .get_mut(&TypeId::of::<Collide>())
+            .map(|c| c.downcast_mut::<Collide>().unwrap())
     }
 }
 
@@ -93,32 +72,20 @@ impl MoveTo {
         println!("move_to");
     }
 }
-static mut MOVE_TOS: OnceCell<HashMap<Uuid, MoveTo>> = OnceCell::new();
-impl Component for MoveTo {
-    fn insert(self, id: Uuid) {
-        unsafe {
-            MOVE_TOS.get_or_init(|| HashMap::default());
-            MOVE_TOS.get_mut().unwrap().insert(id, self);
-        }
-    }
-
-    fn drop(id: Uuid) {
-        unsafe {
-            MOVE_TOS.get_mut().unwrap().remove(&id);
-        }
+impl<'a> ComponentCombination<'a> for &'a MoveTo {
+    fn filter(entity: &'a Entity) -> Option<Self> {
+        entity
+            .components
+            .get(&TypeId::of::<MoveTo>())
+            .map(|c| c.downcast_ref::<MoveTo>().unwrap())
     }
 }
-impl ComponentCombination for &MoveTo {
-    fn filter(entity: &Entity) -> Option<Self> {
-        unsafe { MOVE_TOS.get_or_init(|| HashMap::default()).get(&entity.id) }
-    }
-}
-impl ComponentCombination for &mut MoveTo {
-    fn filter(entity: &Entity) -> Option<Self> {
-        unsafe {
-            MOVE_TOS.get_or_init(|| HashMap::default());
-            MOVE_TOS.get_mut().unwrap().get_mut(&entity.id)
-        }
+impl<'a> ComponentCombinationMut<'a> for &'a mut MoveTo {
+    fn filter(entity: &'a mut Entity) -> Option<Self> {
+        entity
+            .components
+            .get_mut(&TypeId::of::<MoveTo>())
+            .map(|c| c.downcast_mut::<MoveTo>().unwrap())
     }
 }
 fn main() {
@@ -182,17 +149,17 @@ impl App {
             systems: Vec::new(),
         }
     }
-    fn add_system<'a, T, F>(&'a mut self, system_func: F)
-    where
-        F: Fn(Vec<T>) + 'static,
-        T: ComponentCombination,
-    {
-        let wrapped_system_func = Box::new(move |entities: &Vec<Entity>| {
-            let components = get_components::<T>(entities);
-            system_func(components);
-        });
-        self.systems.push(wrapped_system_func);
-    }
+    // fn add_system<'a, T, F>(&'a mut self, system_func: F)
+    // where
+    //     F: Fn(Vec<T>) + 'static,
+    //     T: ComponentCombination,
+    // {
+    //     let wrapped_system_func = Box::new(move |entities: &Vec<Entity>| {
+    //         let components = get_components::<T>(entities);
+    //         system_func(components);
+    //     });
+    //     self.systems.push(wrapped_system_func);
+    // }
     fn run(&self, entities: &Vec<Entity>) {
         for system in &self.systems {
             system(entities);
@@ -222,7 +189,9 @@ fn simple_system3(tuples: Vec<(&Collide, &MoveTo)>) {
     }
 }
 
-fn get_components<'entity, T: ComponentCombination>(entities: &Vec<Entity>) -> Vec<T> {
+fn get_components<'entity, T: ComponentCombination<'entity>>(
+    entities: &'entity Vec<Entity>,
+) -> Vec<T> {
     let mut components = Vec::new();
     for entity in entities {
         if let Some(component) = T::filter(entity) {
@@ -232,10 +201,10 @@ fn get_components<'entity, T: ComponentCombination>(entities: &Vec<Entity>) -> V
     components
 }
 
-impl<'entity, T0: ComponentCombination, TB: ComponentCombination> ComponentCombination
-    for (T0, TB)
+impl<'entity, T0: ComponentCombination<'entity>, TB: ComponentCombination<'entity>>
+    ComponentCombination<'entity> for (T0, TB)
 {
-    fn filter(entity: &Entity) -> Option<Self> {
+    fn filter(entity: &'entity Entity) -> Option<Self> {
         let a = T0::filter(entity)?;
         let b = TB::filter(entity)?;
         Some((a, b))
