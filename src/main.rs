@@ -4,27 +4,30 @@ use uuid::Uuid;
 
 struct Entity {
     id: Uuid,
-    components: FxHashMap<TypeId, Box<dyn Any>>,
+    components: Vec<Box<dyn Any>>,
 }
 
 impl Entity {
     fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
-            components: FxHashMap::default(),
+            components: Vec::new(),
         }
     }
     fn add_component<T: 'static>(mut self, component: T) -> Self {
-        self.components
-            .insert(TypeId::of::<T>(), Box::new(component));
+        self.components.push(Box::new(component));
         self
     }
 }
 
 fn new_player() -> Entity {
     Entity::new()
-        .add_component(Collide {})
         .add_component(MoveTo {})
+        .add_component(MoveTo {})
+        .add_component(MoveTo {})
+        .add_component(MoveTo {})
+        .add_component(MoveTo {})
+        .add_component(Collide {})
 }
 
 fn new_wall() -> Entity {
@@ -53,7 +56,8 @@ impl<'a> ComponentCombination<'a> for &'a Collide {
     fn filter(entity: &'a Entity) -> Option<Self> {
         entity
             .components
-            .get(&TypeId::of::<Collide>())
+            .iter()
+            .find(|c| c.is::<Collide>())
             .map(|c| c.downcast_ref::<Collide>().unwrap())
     }
 }
@@ -61,7 +65,8 @@ impl<'a> ComponentCombinationMut<'a> for &'a mut Collide {
     fn filter(entity: &'a mut Entity) -> Option<Self> {
         entity
             .components
-            .get_mut(&TypeId::of::<Collide>())
+            .iter_mut()
+            .find(|c| c.is::<Collide>())
             .map(|c| c.downcast_mut::<Collide>().unwrap())
     }
 }
@@ -76,7 +81,8 @@ impl<'a> ComponentCombination<'a> for &'a MoveTo {
     fn filter(entity: &'a Entity) -> Option<Self> {
         entity
             .components
-            .get(&TypeId::of::<MoveTo>())
+            .iter()
+            .find(|c| c.is::<MoveTo>())
             .map(|c| c.downcast_ref::<MoveTo>().unwrap())
     }
 }
@@ -84,7 +90,8 @@ impl<'a> ComponentCombinationMut<'a> for &'a mut MoveTo {
     fn filter(entity: &'a mut Entity) -> Option<Self> {
         entity
             .components
-            .get_mut(&TypeId::of::<MoveTo>())
+            .iter_mut()
+            .find(|c| c.is::<MoveTo>())
             .map(|c| c.downcast_mut::<MoveTo>().unwrap())
     }
 }
